@@ -1,0 +1,18 @@
+__pycache__
+*/__pycache__
+*/*/__pycache__
+*/*/*/__pycache__
+data/
+checkpoints/
+*.zip
+files/
+*.pyc
+.ipynb_checkpoints/
+config/ckp/
+config/config/
+config/logs/
+config/results/
+config/*.txt
+#data/pointcloud2image.py
+# utils/define.py
+# src/utils/eva_utils_acc.py
