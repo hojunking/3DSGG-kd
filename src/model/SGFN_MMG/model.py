@@ -89,6 +89,7 @@ class Mmgnet(BaseModel):
             use_edge=self.mconfig.USE_GCN_EDGE,
             DROP_OUT_ATTEN=self.mconfig.DROP_OUT_ATTEN)
 
+        ## talk
         if self.kd and teacher != True:
             self.reduced_point_dim = False
             self.reduced_edge_dim = False
@@ -103,6 +104,7 @@ class Mmgnet(BaseModel):
                 self.edge_feature_dim_mapper = FeatureDimMapper(
                     self.mconfig.edge_feature_size*2,
                     self.mconfig.edge_feature_size)
+        
         # self.triplet_projector_3d = torch.nn.Sequential(
         #     torch.nn.Linear(512 * 3, 512 * 2),
         #     torch.nn.Dropout(0.5),
@@ -318,9 +320,6 @@ class Mmgnet(BaseModel):
             
         #return torch.sum(torch.tensor(triplet_loss))
         return torch.mean(torch.tensor(triplet_loss))
-    
-
-    
 
     def forward(self, obj_points, obj_2d_feats, edge_indices, descriptor=None, batch_ids=None, istrain=False):
         
@@ -363,14 +362,20 @@ class Mmgnet(BaseModel):
 
         obj_logits_3d = logit_scale * self.obj_predictor_3d(gcn_obj_feature_3d / gcn_obj_feature_3d.norm(dim=-1, keepdim=True))
         obj_logits_2d = logit_scale * self.obj_predictor_2d(gcn_obj_feature_2d / gcn_obj_feature_2d.norm(dim=-1, keepdim=True))
-    
+
+
+        ## KD
         if istrain and self.kd:
+            ## training as a student
             return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, obj_feature_3d_mimic, obj_features_2d_mimic, gcn_edge_feature_2d_dis, logit_scale, gcn_obj_feature_3d, gcn_edge_feature_3d
         elif istrain:
+            ## for training
             return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, obj_feature_3d_mimic, obj_features_2d_mimic, gcn_edge_feature_2d_dis, logit_scale
         elif self.kd:
+            ## inference for student as a teacher 
             return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, gcn_obj_feature_3d, gcn_edge_feature_3d
         else:
+            ## for evaluation
             return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d
         
     def process_train(self, obj_points, obj_2d_feats, gt_cls, descriptor, gt_rel_cls, edge_indices, batch_ids=None, with_log=False, ignore_none_rel=False, weights_obj=None, weights_rel=None):
@@ -496,6 +501,7 @@ class Mmgnet(BaseModel):
 
     def process_val(self, result_print, obj_points, obj_2d_feats, gt_cls, descriptor, gt_rel_cls, edge_indices,  
                     scan_id=None, split_id=None, origin_obj_points=None, batch_ids=None, with_log=False, use_triplet=False):
+        
         if self.kd:
             obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, _, _ = self(obj_points, obj_2d_feats, edge_indices.t().contiguous(), descriptor, batch_ids, istrain=False)
         else:
@@ -535,14 +541,14 @@ class Mmgnet(BaseModel):
         self.iteration +=1    
         
         obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, obj_feature_3d, obj_feature_2d, edge_feature_2d, obj_logit_scale, gcn_obj_feature, gcn_rel_feature = self(obj_points, obj_2d_feats, edge_indices.t().contiguous(), descriptor, batch_ids, istrain=True)
+        
+        ## talk
         with torch.no_grad():
             t_obj_logits_3d, _, t_rel_cls_3d, _, t_gcn_obj_feature, t_gcn_rel_feature = teacher(obj_points, obj_2d_feats, edge_indices.t().contiguous(), descriptor, batch_ids, istrain=False)
         
         # compute loss for obj
         loss_obj_3d = F.cross_entropy(obj_logits_3d, gt_cls)
         loss_obj_2d = F.cross_entropy(obj_logits_2d, gt_cls)
-
-        
 
         obj_pred, t_obj_pred, rel_pred, t_rel_pred = obj_logits_3d, t_obj_logits_3d, rel_cls_3d, t_rel_cls_3d
         if self.kd_method == 'kl':
@@ -558,12 +564,10 @@ class Mmgnet(BaseModel):
             obj_feature_loss, rel_feature_loss = self.feature_distillation(gcn_obj_feature, t_gcn_obj_feature, gcn_rel_feature, t_gcn_rel_feature)
         
         elif self.kd_method == 'fmse':
-            obj_pred, t_obj_pred, rel_pred, t_rel_pred = self.logit_scaling(obj_pred, t_obj_pred, rel_pred, t_rel_pred)
             t_mse_loss_obj = F.mse_loss(obj_pred, t_obj_pred)
             obj_feature_loss, rel_feature_loss = self.feature_distillation(gcn_obj_feature, t_gcn_obj_feature, gcn_rel_feature, t_gcn_rel_feature)
         # KD mse distillation
         else:
-            obj_pred, t_obj_pred, rel_pred, t_rel_pred = self.logit_scaling(obj_pred, t_obj_pred, rel_pred, t_rel_pred)
             t_mse_loss_obj = F.mse_loss(obj_pred, t_obj_pred)
 
          # compute loss for rel
@@ -723,17 +727,29 @@ class Mmgnet(BaseModel):
     
     def logit_kl_divergence(self, obj_pred, obj_target, rel_pred, rel_target):
         T = self.temperature
-        
-        obj_soft, t_obj_soft, rel_soft, t_rel_soft = self.logit_scaling(obj_pred, obj_target, rel_pred, rel_target)
-        
+
+        # 온도 스케일링 적용
+        obj_pred_scaled = obj_pred / T
+        obj_target_scaled = obj_target / T
+        rel_pred_scaled = rel_pred / T
+        rel_target_scaled = rel_target / T
+
         # KL Divergence Loss
-        kl_loss_obj = F.kl_div(F.log_softmax(obj_soft / T, dim=1), t_obj_soft, reduction='batchmean') * (T * T)
-        kl_loss_rel = F.kl_div(F.log_softmax(rel_soft / T, dim=1), t_rel_soft, reduction='batchmean') * (T * T)
+        kl_loss_obj = F.kl_div(
+            F.log_softmax(obj_pred_scaled, dim=1),
+            F.softmax(obj_target_scaled, dim=1),
+            reduction='batchmean'
+        ) * (T * T)
+        kl_loss_rel = F.kl_div(
+            F.log_softmax(rel_pred_scaled, dim=1),
+            F.softmax(rel_target_scaled, dim=1),
+            reduction='batchmean'
+        ) * (T * T)
 
         return kl_loss_obj, kl_loss_rel
     
     def feature_distillation(self, obj_feature, obj_feature_target, rel_feature, rel_feature_target):
-        obj_feature_distillation_loss, rel_feature_distillation_loss =0,0
+        obj_feature_distillation_loss, rel_feature_distillation_loss =0.0,0.0
         if self.reduced_point_dim:
             obj_feature_target = self.obj_feature_dim_mapper(obj_feature_target)
             obj_feature_distillation_loss = F.mse_loss(obj_feature, obj_feature_target)
@@ -742,53 +758,6 @@ class Mmgnet(BaseModel):
             rel_feature_target = self.edge_feature_dim_mapper(rel_feature_target)
             rel_feature_distillation_loss = F.mse_loss(rel_feature, rel_feature_target)
         return obj_feature_distillation_loss, rel_feature_distillation_loss
-    
-    def logit_scaling(self, obj_pred, obj_target, rel_pred, rel_target):
-        T = self.temperature
-
-        ## teacher and student probability distribution obj
-        obj_soft = F.softmax(obj_pred / T, dim=1)
-        t_obj_soft = F.softmax(obj_target / T, dim=1)
-
-        ## teacher and student probability distribution rel
-        rel_soft = F.softmax(rel_pred / T, dim=1)   
-        t_rel_soft = F.softmax(rel_target / T, dim=1)
-
-        return obj_soft, t_obj_soft, rel_soft, t_rel_soft
-    def val_loss(self, obj_points, obj_2d_feats, gt_cls, descriptor, gt_rel_cls, edge_indices, batch_ids=None, with_log=False, use_triplet=True, ignore_none_rel=False, weights_obj=None, weights_rel=None):
-        if self.kd:
-            obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, _, _ = self(obj_points, obj_2d_feats, edge_indices.t().contiguous(), descriptor, batch_ids, istrain=False)
-        else:
-            obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, obj_feature_3d, obj_feature_2d, edge_feature_2d, obj_logit_scale = self(obj_points, obj_2d_feats, edge_indices.t().contiguous(), descriptor, batch_ids, istrain=True)
-        # compute loss for obj
-        loss_obj_3d = F.cross_entropy(obj_logits_3d, gt_cls)
-        loss_obj_2d = F.cross_entropy(obj_logits_2d, gt_cls)
-
-        loss_rel_3d = F.binary_cross_entropy(rel_cls_3d, gt_rel_cls)
-        loss_rel_2d = F.binary_cross_entropy(rel_cls_2d, gt_rel_cls)
-        
-        lambda_r = 1.0
-        lambda_o = self.mconfig.lambda_o
-        lambda_max = max(lambda_r,lambda_o)
-        lambda_r /= lambda_max
-        lambda_o /= lambda_max
-
-        obj_feature_3d = obj_feature_3d / obj_feature_3d.norm(dim=-1, keepdim=True)
-        obj_feature_2d = obj_feature_2d / obj_feature_2d.norm(dim=-1, keepdim=True)
-        loss_mimic = self.cosine_loss(obj_feature_3d, obj_feature_2d, t=0.8)
-
-        # compute similarity between visual with text
-        rel_text_feat = self.get_rel_emb(gt_cls, gt_rel_cls, edge_indices)
-
-        edge_feature_2d = edge_feature_2d / edge_feature_2d.norm(dim=-1, keepdim=True)
-        rel_mimic_2d = F.l1_loss(edge_feature_2d, rel_text_feat)
-               
-        loss = lambda_o * (loss_obj_2d + loss_obj_3d) + 3 * lambda_r * (loss_rel_2d + loss_rel_3d) + 0.1 * (loss_mimic + rel_mimic_2d)
-        
-        self.backward2(loss)
-        
-        return loss
-
 
     def backward(self, loss):
         loss.backward()
@@ -797,7 +766,3 @@ class Mmgnet(BaseModel):
         self.optimizer.zero_grad()
         # update lr
         self.lr_scheduler.step()
-
-    def backward2(self, loss):
-        self.zero_grad()
-        loss.backward()

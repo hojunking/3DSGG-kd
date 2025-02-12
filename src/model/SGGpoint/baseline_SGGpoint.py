@@ -279,21 +279,6 @@ class SGGpoint(BaseModel):
         self.obj_classifier = NodeMLP(embeddings=self.mconfig.point_feature_size, nObjClasses=num_obj_class)
         self.rel_classifier = EdgeMLP(embeddings=self.mconfig.edge_feature_size, nRelClasses=num_rel_class)
         
-        if self.kd and teacher != True:
-            self.reduced_point_dim = False
-            self.reduced_edge_dim = False
-            if '_p_' in config.exp:
-                self.reduced_point_dim = True
-                
-                self.obj_feature_dim_mapper = FeatureDimMapper(
-                    self.mconfig.point_feature_size*2,
-                    self.mconfig.point_feature_size)
-            if '_e_' in config.exp:
-                self.reduced_edge_dim = True  
-                self.edge_feature_dim_mapper = FeatureDimMapper(
-                    self.mconfig.edge_feature_size*2,
-                    self.mconfig.edge_feature_size)
-        
         self.obj_logit_scale = torch.nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.optimizer = optim.Adam([
             {'params':self.backbone.parameters(), 'lr':float(1e-3), 'weight_decay':float(1e-4), 'amsgrad':False},
@@ -518,35 +503,15 @@ class SGGpoint(BaseModel):
         
         return top_k_obj, top_k_obj, top_k_rel, top_k_rel, top_k_triplet, top_k_triplet, cls_matrix, sub_scores, obj_scores, rel_scores
     
-    def val_loss(self, obj_points, obj_2d_feats, gt_cls, descriptor, gt_rel_cls, edge_indices, batch_ids=None, with_log=False, ignore_none_rel=False, weights_obj=None, weights_rel=None):
-        self.iteration += 1 
-
-        obj_logits_3d, rel_cls_3d, _ = self(obj_points, obj_2d_feats, edge_indices.t().contiguous(), descriptor, batch_ids, istrain=True)
-        loss_obj_3d = F.cross_entropy(obj_logits_3d, gt_cls)
-        
-        batch_mean = torch.sum(gt_rel_cls, dim=(0))
-        zeros = (gt_rel_cls.sum(-1) ==0).sum().unsqueeze(0)
-        batch_mean = torch.cat([zeros,batch_mean],dim=0)
-        weight = torch.abs(1.0 / (torch.log(batch_mean+1)+1)) # +1 to prevent 1 /log(1) = inf                
-            
-        weight[torch.where(weight==0)] = weight[0].clone() if not ignore_none_rel else 0# * 1e-3
-        weight = weight[1:]
-        loss_rel_3d = F.binary_cross_entropy(rel_cls_3d, gt_rel_cls, weight=weight)
-
-        loss = 0.1 * loss_obj_3d + 3 * loss_rel_3d
-        self.backward2(loss)
-
-        return loss
-    
 
     def logit_kl_divergence(self, obj_pred, obj_target, rel_pred, rel_target):
         T = self.temperature
 
         # 온도 스케일링 적용
-        obj_pred_scaled = self.logit_scaling(obj_pred)
-        obj_target_scaled = self.logit_scaling(obj_target)
-        rel_pred_scaled = self.logit_scaling(rel_pred)
-        rel_target_scaled = self.logit_scaling(rel_target)
+        obj_pred_scaled = obj_pred / T
+        obj_target_scaled = obj_target / T
+        rel_pred_scaled = rel_pred / T
+        rel_target_scaled = rel_target / T
 
         # KL Divergence Loss
         kl_loss_obj = F.kl_div(
@@ -574,18 +539,9 @@ class SGGpoint(BaseModel):
         return obj_feature_distillation_loss, rel_feature_distillation_loss
 
 
-    def logit_scaling(self, logits):
-        T = self.temperature
-        return logits / T
-    
-
     def backward(self, loss):
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
         # update lr
         self.lr_scheduler.step()
-
-    def backward2(self, loss):
-        self.zero_grad()
-        loss.backward()

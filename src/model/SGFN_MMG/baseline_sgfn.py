@@ -92,21 +92,6 @@ class SGFN(BaseModel):
         self.obj_predictor = PointNetCls(num_obj_class, in_size=self.mconfig.point_feature_size,
                                  batch_norm=with_bn, drop_out=True)
         
-        if self.kd and teacher != True:
-            self.reduced_point_dim = False
-            self.reduced_edge_dim = False
-            if '_p_' in config.exp:
-                self.reduced_point_dim = True
-                
-                self.obj_feature_dim_mapper = FeatureDimMapper(
-                    self.mconfig.point_feature_size*2,
-                    self.mconfig.point_feature_size)
-            if '_e_' in config.exp:
-                self.reduced_edge_dim = True  
-                self.edge_feature_dim_mapper = FeatureDimMapper(
-                    self.mconfig.edge_feature_size*2,
-                    self.mconfig.edge_feature_size)
-
         if mconfig.multi_rel_outputs:
             self.rel_predictor = PointNetRelClsMulti(
                 num_rel_class, 
@@ -237,28 +222,6 @@ class SGFN(BaseModel):
 
         return top_k_obj, top_k_obj, top_k_rel, top_k_rel, top_k_triplet, top_k_triplet, cls_matrix, sub_scores, obj_scores, rel_scores
 
-    def val_loss(self, obj_points, obj_2d_feats, gt_cls, descriptor, gt_rel_cls, edge_indices, batch_ids=None, with_log=False, ignore_none_rel=False, weights_obj=None, weights_rel=None):
-        self.iteration += 1
-
-        obj_pred, rel_pred = self(obj_points, obj_2d_feats, edge_indices.t().contiguous(), descriptor, batch_ids, istrain=True)
-        
-        # compute loss for obj
-        loss_obj = F.cross_entropy(obj_pred, gt_cls)
-
-        # compute loss for rel
-        loss_rel = self.compute_rel_loss(rel_pred, gt_rel_cls, ignore_none_rel, weights_rel)
-
-        # Apply lambda scaling
-        lambda_r = 1.0
-        lambda_o = self.mconfig.lambda_o
-        lambda_max = max(lambda_r, lambda_o)
-        lambda_r /= lambda_max
-        lambda_o /= lambda_max
-
-        loss = lambda_o * loss_obj + lambda_r * loss_rel
-        self.backward2(loss)
-
-        return loss
 
     def kd_process_train(self, teacher, obj_points, obj_2d_feats, gt_cls, descriptor, gt_rel_cls, edge_indices, batch_ids=None, with_log=False, ignore_none_rel=False, weights_obj=None, weights_rel=None, beta=(0,0)):
         self.iteration += 1
@@ -400,10 +363,10 @@ class SGFN(BaseModel):
         T = self.temperature
 
         # 온도 스케일링 적용
-        obj_pred_scaled = self.logit_scaling(obj_pred)
-        obj_target_scaled = self.logit_scaling(obj_target)
-        rel_pred_scaled = self.logit_scaling(rel_pred)
-        rel_target_scaled = self.logit_scaling(rel_target)
+        obj_pred_scaled = obj_pred / T
+        obj_target_scaled = obj_target / T
+        rel_pred_scaled = rel_pred / T
+        rel_target_scaled = rel_target / T
 
         # KL Divergence Loss
         kl_loss_obj = F.kl_div(
@@ -430,17 +393,9 @@ class SGFN(BaseModel):
             rel_feature_distillation_loss = F.mse_loss(rel_feature, rel_feature_target)
         return obj_feature_distillation_loss, rel_feature_distillation_loss
     
-    def logit_scaling(self, logits):
-        T = self.temperature
-        return logits / T
-
     def backward(self, loss):
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
         # update lr
         self.lr_scheduler.step()
-
-    def backward2(self, loss):
-        self.zero_grad()
-        loss.backward()

@@ -117,21 +117,5 @@
       "drop_edge": 0.5,
       "drop_edge_eval": 0.0,
       "use_object_weight": false
-  },
-  "pruning": {
-    "load_pruning_model":false,
-      "st_pruning_ratio": 0.0,
-      "unst_pruning_ratio": 0.0,
-      "method": "group_norm",
-      "max_pruning_ratio": 1,
-      "soft_keeping_ratio": 0.2,
-      "speed_up": 1.1,
-      "pruning_type": "l1",
-      "reg": 0.0005,
-      "delta_reg": 0.0001,
-      "weight_decay": 0.0005,
-      "global_pruning": true,
-      "sl_lr_decay_milestones": "60,80",
-      "iterative_steps": 600
   }
 }
