@@ -18,7 +18,7 @@ from src.utils.eva_utils_acc import (evaluate_topk_object,
 from utils import op_utils
 
 class Mmgnet(BaseModel):
-    def __init__(self, config, num_obj_class, num_rel_class, dim_descriptor=11, teacher = False):
+    def __init__(self, config ,num_obj_class, num_rel_class, dim_descriptor=11, tconfig= None):
         '''
         3d cat location, 2d
         '''
@@ -27,10 +27,6 @@ class Mmgnet(BaseModel):
 
         self.mconfig = mconfig = config.MODEL
         with_bn = mconfig.WITH_BN
-        self.kd = config.KD.kd
-        if self.kd:
-            self.kd_method = config.KD.method
-            self.temperature = config.KD.temperature
 
         dim_point = 3
         if mconfig.USE_RGB:
@@ -89,21 +85,23 @@ class Mmgnet(BaseModel):
             use_edge=self.mconfig.USE_GCN_EDGE,
             DROP_OUT_ATTEN=self.mconfig.DROP_OUT_ATTEN)
 
-        ## talk
-        if self.kd and teacher != True:
-            self.reduced_point_dim = False
-            self.reduced_edge_dim = False
-            if '_p_' in config.exp:
-                self.reduced_point_dim = True
-                
-                self.obj_feature_dim_mapper = FeatureDimMapper(
-                    self.mconfig.point_feature_size*2,
-                    self.mconfig.point_feature_size)
-            if '_e_' in config.exp:
-                self.reduced_edge_dim = True  
-                self.edge_feature_dim_mapper = FeatureDimMapper(
-                    self.mconfig.edge_feature_size*2,
-                    self.mconfig.edge_feature_size)
+        self.kd = config.KD.kd
+        
+        # means this is a student model
+        if tconfig is not None:
+            self.kd_method = config.KD.method
+            self.temperature = config.KD.temperature
+
+            # for feature KD            
+            self.obj_feature_dim_mapper = FeatureDimMapper(
+                # Teacher feature size
+                self.tconfig.MODEL.point_feature_size,
+                # Student feature size
+                self.mconfig.point_feature_size)
+            
+            self.edge_feature_dim_mapper = FeatureDimMapper(
+                self.tconfig.MODEL.edge_feature_size,
+                self.mconfig.edge_feature_size) 
         
         # self.triplet_projector_3d = torch.nn.Sequential(
         #     torch.nn.Linear(512 * 3, 512 * 2),
@@ -367,13 +365,16 @@ class Mmgnet(BaseModel):
         ## KD
         if istrain and self.kd:
             ## training as a student
-            return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, obj_feature_3d_mimic, obj_features_2d_mimic, gcn_edge_feature_2d_dis, logit_scale, gcn_obj_feature_3d, gcn_edge_feature_3d
+            return obj_logits_3d, rel_cls_3d, gcn_obj_feature_3d, gcn_edge_feature_3d
+            
+            #return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, obj_feature_3d_mimic, obj_features_2d_mimic, gcn_edge_feature_2d_dis, logit_scale, gcn_obj_feature_3d, gcn_edge_feature_3d
         elif istrain:
             ## for training
             return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, obj_feature_3d_mimic, obj_features_2d_mimic, gcn_edge_feature_2d_dis, logit_scale
         elif self.kd:
             ## inference for student as a teacher 
-            return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, gcn_obj_feature_3d, gcn_edge_feature_3d
+            return obj_logits_3d, rel_cls_3d, gcn_obj_feature_3d, gcn_edge_feature_3d
+            #return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d, gcn_obj_feature_3d, gcn_edge_feature_3d
         else:
             ## for evaluation
             return obj_logits_3d, obj_logits_2d, rel_cls_3d, rel_cls_2d

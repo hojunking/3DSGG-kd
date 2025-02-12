@@ -24,10 +24,10 @@ from process_data.relation_distribution import Result_print
 from fvcore.nn import FlopCountAnalysis
 
 class MMGNet():
-    def __init__(self, config):
+    def __init__(self, config, tconfig):
         self.config = config
-        self.previous_ratio = 0
-        self.scores = None
+        
+        
         self.model_name = self.config.NAME
         self.mconfig = mconfig = config.MODEL
         self.exp = config.exp
@@ -36,7 +36,10 @@ class MMGNet():
         self.masks = {}
         self.start_time, self.end_time = 0, 0
         
-
+        if tconfig != 'x':
+            self.tconfig = tconfig
+            self.kd = True
+        
         ''' Build dataset '''
         if config.MODE  == 'train':
             if config.VERBOSE: print('build train dataset')
@@ -70,11 +73,11 @@ class MMGNet():
 
         # 모델 클래스를 딕셔너리에 매핑
         model_classes = {
-            'Mmgnet': Mmgnet,
+            'mmgnet': Mmgnet,
             'sgfn': SGFN,
             'sgfnattn': SGFN,
             'sgpn': SGPN,
-            'SGGpoint': SGGpoint,
+            'sggpoint': SGGpoint,
             'imp':IMP
         }
 
@@ -84,19 +87,33 @@ class MMGNet():
         if self.model_name in model_classes:
             # 모델 이름이 올바른지 확인
             model_class = model_classes[self.model_name]
-            self.model = model_class(self.config, num_obj_class, num_rel_class).to(config.DEVICE)
+            self.model = model_class(config=self.config,
+                                    tconfig=self.tconfig,
+                                    num_obj_class=num_obj_class,
+                                    num_rel_class=num_rel_class).to(config.DEVICE)
             
+            if mconfig.use_pretrain != 'x':
+                print(f'load weight: {mconfig.use_pretrain}')
+                self.model.load_pretrain_model(mconfig.use_pretrain, skip_names=['obj_feature_dim_mapper', 'edge_feature_dim_mapper'], is_freeze=False)
         else:
             print(f'Unknown model name: {self.model_name}')
             raise NotImplementedError
         
         # Teacher model load
-        if self.config.KD.kd and self.config.KD.t_model_path != "":
-            self.t_model = model_class(self.config, num_obj_class, num_rel_class, teacher = True).to(config.DEVICE)
-            
-            print(f'load teacher model: {self.config.KD.t_model_path}')
-            self.t_model.load_pretrain_model(self.config.KD.t_model_path, is_freeze=True)
+        if self.kd:
+            print(f'teacher model name : {self.tconfig.NAME}')
+            self.tconfig.max_iteration = self.max_iteration
 
+            
+            t_model_class = model_classes[self.tconfig.NAME]
+            self.t_model = t_model_class(config=self.tconfig,
+                                        num_obj_class=num_obj_class,
+                                        num_rel_class=num_rel_class,
+                                        tconfig=None).to(config.DEVICE)
+            
+            if self.tconfig.MODEL.use_pretrain != 'x':
+                print(f'load teacher weight: {self.tconfig.MODEL.use_pretrain}')
+                self.t_model.load_pretrain_model(self.tconfig.MODEL.use_pretrain, skip_names=['obj_feature_dim_mapper', 'edge_feature_dim_mapper'], is_freeze=True)
             self.beta = 0,0
             print(f'KD obj_beta: {self.beta[0]}, rel_beta: {self.beta[1]}')
             #else:
@@ -170,7 +187,7 @@ class MMGNet():
                 ''' get data '''
                 obj_points, obj_2d_feats, gt_class, gt_rel_cls, edge_indices, descriptor, batch_ids = self.data_processing_train(items)
                 ### KD Training ###
-                if self.config.KD.kd:
+                if self.kd:
                     self.t_model.eval()
                     logs = self.model.kd_process_train(self.t_model, obj_points, obj_2d_feats, gt_class, descriptor, gt_rel_cls, edge_indices, batch_ids, with_log=True,
                                                 weights_obj=self.dataset_train.w_cls_obj,
@@ -208,10 +225,6 @@ class MMGNet():
             
             self.model.epoch += 1
             
-            ## talks
-            if self.model.epoch > 100 : 
-                self.config.VALID_INTERVAL = 10 
-                   
     def cuda(self, *args):
         return [item.to(self.config.DEVICE) for item in args]
     

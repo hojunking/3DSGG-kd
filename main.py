@@ -15,7 +15,7 @@ import torch
 import argparse
 
 def main():
-    config = load_config()
+    config, tconfig = load_config()
     
     os.environ["CUDA_VISIBLE_DEVICES"] = str(config.GPU[0])
     os.environ["CUDA_LAUNCH_BLOCKING"] = "0"
@@ -27,7 +27,7 @@ def main():
     if config.VERBOSE:
         print(config)
     
-    model = MMGNet(config)
+    model = MMGNet(config, tconfig)
 
     save_path = os.path.join(config.PATH,'config', model.model_name, model.exp)
     os.makedirs(save_path, exist_ok=True)
@@ -110,15 +110,12 @@ def load_config():
     parser.add_argument('--loadbest', type=int, default=0,choices=[0,1], help='1: load best model or 0: load checkpoints. Only works in non training mode.')
     parser.add_argument('--mode', type=str, choices=['train','trace','eval','prune'], help='mode. can be [train,trace,eval]',required=True)
     parser.add_argument('--exp', type=str)
-    parser.add_argument('--part', type=str)
-    parser.add_argument('--st_ratio', type=str)
-    parser.add_argument('--unst_ratio', type=str)
-    parser.add_argument('--pretrained', type=str)
+    parser.add_argument('--tconfig', type=str)
 
 
     args = parser.parse_args()
     config_path = os.path.abspath(args.config)
-
+    print('config path:', config_path)
     if not os.path.exists(config_path):
         raise RuntimeError('Targer config file does not exist. {}' & config_path)
     
@@ -136,18 +133,16 @@ def load_config():
     config.LOADBEST = args.loadbest
     config.MODE = args.mode
     config.exp = args.exp
-    config.pruning_part = args.part
     
-
-    if args.pretrained:
-        if os.path.exists(args.pretrained):
-            print(f'===   load pretrain model: {args.pretrained}   ===')
-            config.MODEL.use_pretrain = args.pretrained
-        elif args.pretrained =='x':
-            print('===   No pretrained weight start   ===')
-        else:
-            raise FileNotFoundError(f"The folder '{args.pretrained}' does not exist.")
-    return config
+    ## teacher config load
+    if args.tconfig != 'x':
+        print('================ teacher config loaded ================')
+        tconfig_path = os.path.abspath(args.tconfig)
+        if not os.path.exists(config_path):
+            raise RuntimeError('Targer config file does not exist. {}' & config_path)
+        tconfig = Config(tconfig_path)
+        tconfig.exp = "teacher"
+    return config, tconfig
 
 def set_config(config):
     exp = config.exp

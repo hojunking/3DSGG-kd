@@ -14,7 +14,7 @@ class SGPN(BaseModel):
     """
     512 + 256 baseline
     """
-    def __init__(self, config, num_obj_class, num_rel_class, dim_descriptor=11, teacher = False):
+    def __init__(self, config, num_obj_class, num_rel_class, dim_descriptor=11, tconfig= None):
         super().__init__('SGPN', config)
 
         self.mconfig = mconfig = config.MODEL

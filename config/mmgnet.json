@@ -1,7 +1,7 @@
 {
-  "_NAME": ["sgfn", "Mmgnet", "sgpn", "SGGpoint", "imp"],
+  "_NAME": ["sgfn", "mmgnet", "sgpn", "sggpoint", "imp"],
   "MODEL_PATH": "/home/knuvi/Desktop/song/3DSGG-kd/src/model/model.py",
-  "NAME": "Mmgnet",
+  "NAME": "mmgnet",
   "PATH": "/home/knuvi/Desktop/song/3DSGG-kd/config",
   "multi_view_root": "/home/knuvi/Desktop/song/3DSGG-kd/",
   "VERBOSE": false,
@@ -25,11 +25,10 @@
   "WEIGHTING": true,
 
   "KD": {
-    "kd": false,
+    "kd": true,
     "method": "logits",
     "temperature": 2,
-    "gamma": 0.1,
-    "t_model_path": "/home/knuvi/Desktop/song/light_gnn/config/ckp/Mmgnet/real_mmg"
+    "gamma": 0.1
     },
   "MODEL": {
     "N_LAYERS": 2,
@@ -63,9 +62,7 @@
     "w_bg": 1.0,
     "NONE_RATIO": 1.0,
     "NUM_HEADS": 8,
-    "use_pretrain":"",
-    "KD": true,
-    "KD_method": "logits",
+    "use_pretrain":"/home/knuvi/Desktop/song/3DSGG-kd/config/ckp/Mmgnet/3dssg_best_ckpt",
     "use_descriptor": true,
     "obj_label_path":"/home/knuvi/Desktop/song/3DSGG-kd/data/3DSSG_subset/classes.txt",
     "rel_label_path":"/home/knuvi/Desktop/song/3DSGG-kd/data/3DSSG_subset/relations.txt",

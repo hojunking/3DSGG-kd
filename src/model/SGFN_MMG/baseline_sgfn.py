@@ -13,17 +13,12 @@ class SGFN(BaseModel):
     """
     512 + 256 baseline
     """
-    def __init__(self, config, num_obj_class, num_rel_class, dim_descriptor=11, teacher = False):
+    def __init__(self, config, num_obj_class, num_rel_class, dim_descriptor=11, tconfig= None):
         super().__init__('SGFN', config)
 
         self.mconfig = mconfig = config.MODEL
         with_bn = mconfig.WITH_BN
         
-        self.kd = config.KD.kd
-        if self.kd:
-            self.kd_method = config.KD.method
-            self.temperature = config.KD.temperature
-
         dim_point = 3
         if mconfig.USE_RGB:
             dim_point +=3
@@ -89,6 +84,23 @@ class SGFN(BaseModel):
                                 use_edge=self.mconfig.USE_GCN_EDGE,
                                 DROP_OUT_ATTEN=self.mconfig.DROP_OUT_ATTEN)
 
+        self.kd = config.KD.kd
+        # means this is a student model
+        if tconfig is not None:
+            self.kd_method = config.KD.method
+            self.temperature = config.KD.temperature
+
+            # for feature KD            
+            self.obj_feature_dim_mapper = FeatureDimMapper(
+                # Teacher feature size
+                tconfig.MODEL.point_feature_size,
+                # Student feature size
+                mconfig.point_feature_size)
+            
+            self.edge_feature_dim_mapper = FeatureDimMapper(
+                tconfig.MODEL.edge_feature_size,
+                self.mconfig.edge_feature_size)
+        
         self.obj_predictor = PointNetCls(num_obj_class, in_size=self.mconfig.point_feature_size,
                                  batch_norm=with_bn, drop_out=True)
         
